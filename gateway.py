@@ -34,14 +34,6 @@ class PaymentTransaction:
     """
     __name__ = 'payment_gateway.transaction'
 
-    gift_card = fields.Many2One(
-        'gift_card.gift_card', 'Gift Card', domain=[('state', '=', 'active')],
-        states={
-            'required': Eval('method') == 'gift_card',
-            'readonly': Eval('state') != 'draft'
-        }, select=True
-    )
-
     @classmethod
     def __setup__(cls):
         super(PaymentTransaction, cls).__setup__()

@@ -25,6 +25,7 @@ def register():
         GiftCardRedeemDone,
         SaleLine,
         Sale,
+        SalePayment,
         PaymentGateway,
         PaymentTransaction,
         Product,

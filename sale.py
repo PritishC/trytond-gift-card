@@ -9,7 +9,7 @@ from trytond.model import fields, ModelView
 from trytond.pool import PoolMeta, Pool
 from trytond.pyson import Eval, Bool
 
-__all__ = ['SaleLine', 'Sale']
+__all__ = ['SaleLine', 'Sale', 'SalePayment']
 __metaclass__ = PoolMeta
 
 
@@ -214,6 +214,13 @@ class Sale:
             line.create_gift_cards()
 
     @classmethod
+    def get_payment_method_priority(cls):
+        """Priority order for payment methods. Downstream modules can override
+        this method to change the method priority.
+        """
+        return ('manual', 'credit_card', 'gift_card')
+
+    @classmethod
     @ModelView.button
     def process(cls, sales):
         """
@@ -226,3 +233,16 @@ class Sale:
             if sale.state not in ('confirmed', 'processing', 'done'):
                 continue        # pragma: no cover
             sale.create_gift_cards()
+
+
+class SalePayment:
+    "Sale Payment"
+    __name__ = 'sale.payment'
+
+    gift_card = fields.Many2One(
+        'gift_card.gift_card', 'Gift Card',
+        states={
+            'required': Eval('method') == 'gift_card',
+            'invisible': Eval('method') != 'gift_card'
+        }, select=True
+    )

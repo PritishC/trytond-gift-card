@@ -1,4 +1,7 @@
 psycopg2
 
+# Install sale-payment-gateway from 3.2 branch
+https://github.com/openlabs/sale-payment-gateway/archive/3.2.zip
+
 # Install this package itself
 .
