@@ -10,7 +10,7 @@ from gift_card import (
     GiftCard, GiftCardReport, GiftCardRedeemStart, GiftCardRedeemDone,
     GiftCardRedeemWizard
 )
-from sale import SaleLine, Sale
+from sale import SaleLine, Sale, SalePayment
 from configuration import Configuration
 from gateway import PaymentGateway, PaymentTransaction
 from product import Product, GiftCardPrice

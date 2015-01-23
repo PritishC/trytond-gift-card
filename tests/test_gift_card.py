@@ -77,12 +77,14 @@ class TestGiftCard(TestBase):
         InvoiceLine = POOL.get('account.invoice.line')
         Configuration = POOL.get('gift_card.configuration')
         SaleLine = POOL.get('sale.line')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
 
             self.setup_defaults()
 
             gift_card_product = self.create_product(is_gift_card=True)
+            gateway = self.create_payment_gateway(method='manual')
 
             with Transaction().set_context({'company': self.company.id}):
 
@@ -118,6 +120,12 @@ class TestGiftCard(TestBase):
                         }])
                     ]
 
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('1000'),
+                    'gateway': gateway,
                 }])
 
                 sale_line1, = SaleLine.search([
@@ -211,12 +219,14 @@ class TestGiftCard(TestBase):
         Invoice = POOL.get('account.invoice')
         Configuration = POOL.get('gift_card.configuration')
         SaleLine = POOL.get('sale.line')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
 
             self.setup_defaults()
 
             gift_card_product = self.create_product(is_gift_card=True)
+            gateway = self.create_payment_gateway(method='manual')
 
             with Transaction().set_context({'company': self.company.id}):
 
@@ -253,6 +263,12 @@ class TestGiftCard(TestBase):
                         }])
                     ]
 
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('1000'),
+                    'gateway': gateway,
                 }])
 
                 sale_line1, = SaleLine.search([
@@ -333,6 +349,7 @@ class TestGiftCard(TestBase):
         InvoiceLine = POOL.get('account.invoice.line')
         Configuration = POOL.get('gift_card.configuration')
         SaleLine = POOL.get('sale.line')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
 
@@ -343,6 +360,7 @@ class TestGiftCard(TestBase):
                 mode='virtual',
                 is_gift_card=True
             )
+            gateway = self.create_payment_gateway(method='manual')
 
             with Transaction().set_context({'company': self.company.id}):
 
@@ -373,6 +391,12 @@ class TestGiftCard(TestBase):
                         }])
                     ]
 
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('1000'),
+                    'gateway': gateway,
                 }])
 
                 sale_line1, = SaleLine.search([
@@ -507,12 +531,14 @@ class TestGiftCard(TestBase):
         Sale = POOL.get('sale.sale')
         GiftCard = POOL.get('gift_card.gift_card')
         Invoice = POOL.get('account.invoice')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
 
             self.setup_defaults()
 
             gift_card_product = self.create_product(is_gift_card=True)
+            gateway = self.create_payment_gateway(method='manual')
 
             gc_price, _, = gift_card_product.gift_card_prices
 
@@ -541,6 +567,12 @@ class TestGiftCard(TestBase):
                         }])
                     ]
 
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('1000'),
+                    'gateway': gateway,
                 }])
 
                 # Gift card line amount is included in untaxed amount
@@ -663,10 +695,12 @@ class TestGiftCard(TestBase):
         Test gift card authorization
         """
         GiftCard = POOL.get('gift_card.gift_card')
-        PaymentTransaction = POOL.get('payment_gateway.transaction')
+        SalePayment = POOL.get('sale.payment')
+        Sale = POOL.get('sale.sale')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
             self.setup_defaults()
+            gateway = self.create_payment_gateway()
 
             with Transaction().set_context({'company': self.company.id}):
 
@@ -680,19 +714,36 @@ class TestGiftCard(TestBase):
 
                 # Case 1:
                 # Gift card available amount (150) > amount to be paid (50)
-                payment_transaction = PaymentTransaction(
-                    description="Pay invoice using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('50'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 50,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.authorize([payment_transaction])
+                }])
 
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('50'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
+                Sale.confirm([sale])
+
+                payment_transaction = payment.payment_transactions[0]
                 self.assertEqual(payment_transaction.state, 'authorized')
 
                 self.assertEqual(
@@ -704,29 +755,48 @@ class TestGiftCard(TestBase):
                 )
 
                 # Case 2: Gift card amount (100) < amount to be paid (300)
-                payment_transaction = PaymentTransaction(
-                    description="Pay invoice using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('300'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 300,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
+
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('300'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
 
                 with self.assertRaises(UserError):
-                    PaymentTransaction.authorize([payment_transaction])
+                    Sale.confirm([sale])
 
     def test0055_capture_gift_card(self):
         """
         Test capturing of gift card
         """
         GiftCard = POOL.get('gift_card.gift_card')
-        PaymentTransaction = POOL.get('payment_gateway.transaction')
+        SalePayment = POOL.get('sale.payment')
+        Sale = POOL.get('sale.sale')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
             self.setup_defaults()
+            gateway = self.create_payment_gateway()
 
             with Transaction().set_context({'company': self.company.id}):
 
@@ -752,19 +822,39 @@ class TestGiftCard(TestBase):
 
                 # Capture
                 # Case 1
-                # Gift card available amount(200) > amount to be paid (180)
-                payment_transaction = PaymentTransaction(
-                    description="Pay using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('100'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                # Gift card available amount(200) > amount to be paid (100)
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'payment_capture_on': 'sale_process',
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 100,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.capture([payment_transaction])
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('100'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
+                Sale.confirm([sale])
+                Sale.process([sale])
+
+                payment_transaction = payment.payment_transactions[0]
 
                 self.assertEqual(payment_transaction.state, 'posted')
 
@@ -782,18 +872,38 @@ class TestGiftCard(TestBase):
 
                 # Case 2
                 # Gift card available amount (100) = amount to be paid (100)
-                payment_transaction = PaymentTransaction(
-                    description="Pay invoice using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('100'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'payment_capture_on': 'sale_process',
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 100,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.capture([payment_transaction])
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('100'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
+                Sale.confirm([sale])
+                Sale.process([sale])
+
+                payment_transaction = payment.payment_transactions[0]
 
                 self.assertEqual(payment_transaction.state, 'posted')
                 self.assertEqual(
@@ -816,25 +926,45 @@ class TestGiftCard(TestBase):
                 }])
 
                 # Case 3: Gift card amount (10) < amount to be paid (100)
-                payment_transaction = PaymentTransaction(
-                    description="Pay invoice using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('100'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'payment_capture_on': 'sale_process',
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 100,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
+
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('100'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
 
                 with self.assertRaises(UserError):
-                    PaymentTransaction.capture([payment_transaction])
+                    Sale.confirm([sale])
 
     def test0057_settle_gift_card(self):
         """
         Test settlement of gift card
         """
         GiftCard = POOL.get('gift_card.gift_card')
+        Sale = POOL.get('sale.sale')
+        SalePayment = POOL.get('sale.payment')
         PaymentTransaction = POOL.get('payment_gateway.transaction')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
@@ -852,18 +982,34 @@ class TestGiftCard(TestBase):
 
                 # Authorization of gift card
                 # Case 1: Gift card available amount > amount to be paid
-                payment_transaction = PaymentTransaction(
-                    description="Pay using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('100'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 100,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.authorize([payment_transaction])
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('100'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
+                Sale.confirm([sale])
 
                 self.assertEqual(
                     active_gift_card.amount_captured, Decimal('0')
@@ -880,18 +1026,34 @@ class TestGiftCard(TestBase):
 
                 # Settlement
                 # Case 1: Gift card amount (100) > amount to be settled (50)
-                payment_transaction = PaymentTransaction(
-                    description="Pay using gift card",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('50'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction.save()
+                sale, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 50,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.authorize([payment_transaction])
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('50'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+
+                Sale.quote([sale])
+                Sale.confirm([sale])
 
                 self.assertEqual(
                     active_gift_card.amount_captured, Decimal('0')
@@ -906,7 +1068,8 @@ class TestGiftCard(TestBase):
                     active_gift_card.amount_available, Decimal('50')
                 )
 
-                PaymentTransaction.settle([payment_transaction])
+                PaymentTransaction.settle(payment.payment_transactions)
+                payment_transaction = payment.payment_transactions[0]
 
                 self.assertEqual(payment_transaction.state, 'posted')
 
@@ -947,7 +1110,8 @@ class TestGiftCard(TestBase):
         Check authorized, captured and available amount fro gift card
         """
         GiftCard = POOL.get('gift_card.gift_card')
-        PaymentTransaction = POOL.get('payment_gateway.transaction')
+        Sale = POOL.get('sale.sale')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
             self.setup_defaults()
@@ -962,59 +1126,72 @@ class TestGiftCard(TestBase):
 
                 gateway = self.create_payment_gateway()
 
-                # Payment transactions in authorized state
-                payment_transaction1 = PaymentTransaction(
-                    description="Payment Transaction 1",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('70'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction1.save()
+                sale1, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 90,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.authorize([payment_transaction1])
+                }])
 
-                payment_transaction2 = PaymentTransaction(
-                    description="Payment Transaction 2",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('20'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction2.save()
+                sale2, = Sale.create([{
+                    'reference': 'Sale1',
+                    'sale_date': date.today(),
+                    'invoice_address': self.party1.addresses[0].id,
+                    'shipment_address': self.party1.addresses[0].id,
+                    'party': self.party1.id,
+                    'lines': [
+                        ('create', [{
+                            'type': 'line',
+                            'quantity': 1,
+                            'unit': self.uom,
+                            'unit_price': 30,
+                            'description': 'Test description1',
+                            'product': self.product.id,
+                        }])
+                    ]
 
-                PaymentTransaction.authorize([payment_transaction2])
+                }])
 
-                # Payment transactions being captured
-                payment_transaction3 = PaymentTransaction(
-                    description="Payment Transaction 3",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('10'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction3.save()
+                payment1, = SalePayment.create([{
+                    'sale': sale1.id,
+                    'amount': Decimal('70'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+                payment2, = SalePayment.create([{
+                    'sale': sale1.id,
+                    'amount': Decimal('20'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+                payment3, = SalePayment.create([{
+                    'sale': sale2.id,
+                    'amount': Decimal('10'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
+                payment4, = SalePayment.create([{
+                    'sale': sale2.id,
+                    'amount': Decimal('20'),
+                    'gateway': gateway,
+                    'gift_card': active_gift_card.id,
+                }])
 
-                PaymentTransaction.capture([payment_transaction3])
-
-                payment_transaction4 = PaymentTransaction(
-                    description="Payment Transaction 4",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('20'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                    gift_card=active_gift_card,
-                )
-                payment_transaction4.save()
-
-                PaymentTransaction.capture([payment_transaction4])
+                Sale.quote([sale1, sale2])
+                Sale.confirm([sale1, sale2])
+                Sale.process([sale2])
 
             self.assertEqual(active_gift_card.amount_authorized, 90)
             self.assertEqual(active_gift_card.amount_captured, 30)
@@ -1084,6 +1261,7 @@ class TestGiftCard(TestBase):
         Configuration = POOL.get('gift_card.configuration')
         SaleLine = POOL.get('sale.line')
         EmailQueue = POOL.get('email.queue')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
 
@@ -1092,6 +1270,7 @@ class TestGiftCard(TestBase):
             gift_card_product = self.create_product(
                 type='service', mode='virtual', is_gift_card=True
             )
+            gateway = self.create_payment_gateway(method='manual')
 
             with Transaction().set_context({'company': self.company.id}):
 
@@ -1128,6 +1307,12 @@ class TestGiftCard(TestBase):
                         }])
                     ]
 
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('1000'),
+                    'gateway': gateway,
                 }])
 
                 gift_card_line, = SaleLine.search([
@@ -1381,6 +1566,7 @@ class TestGiftCard(TestBase):
         Sale = POOL.get('sale.sale')
         SaleLine = POOL.get('sale.line')
         Configuration = POOL.get('gift_card.configuration')
+        SalePayment = POOL.get('sale.payment')
 
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
             self.setup_defaults()
@@ -1392,6 +1578,7 @@ class TestGiftCard(TestBase):
             gift_card_product = self.create_product(
                 type='goods', mode='physical', is_gift_card=True
             )
+            gateway = self.create_payment_gateway(method='manual')
 
             gift_card_product.allow_open_amount = True
 
@@ -1431,6 +1618,12 @@ class TestGiftCard(TestBase):
 
                 }])
 
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('1000'),
+                    'gateway': gateway,
+                }])
+
                 Sale.quote([sale])
                 Sale.confirm([sale])
 
@@ -1466,6 +1659,12 @@ class TestGiftCard(TestBase):
 
                 }])
 
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('7400'),
+                    'gateway': gateway,
+                }])
+
                 Sale.quote([sale])
                 Sale.confirm([sale])
 
@@ -1499,6 +1698,12 @@ class TestGiftCard(TestBase):
                         }])
                     ]
 
+                }])
+
+                payment, = SalePayment.create([{
+                    'sale': sale.id,
+                    'amount': Decimal('2000'),
+                    'gateway': gateway,
                 }])
 
                 gift_card_line, = SaleLine.search([
@@ -1564,55 +1769,7 @@ class TestGiftCard(TestBase):
 
             self.assertEqual(result['unit_price'], gc_price.price)
 
-    def test0140_pay_manually(self):
-        """
-        Check authorized, captured and available amount for manual method
-        """
-        PaymentTransaction = POOL.get('payment_gateway.transaction')
-
-        with Transaction().start(DB_NAME, USER, context=CONTEXT):
-            self.setup_defaults()
-
-            with Transaction().set_context({'company': self.company.id}):
-
-                gateway = self.create_payment_gateway(method='manual')
-
-                # Authorise Payment transaction
-                payment_transaction = PaymentTransaction(
-                    description="Payment Transaction 1",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('70'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                )
-                payment_transaction.save()
-
-                PaymentTransaction.authorize([payment_transaction])
-
-                self.assertEqual(payment_transaction.state, 'authorized')
-
-                # Settle Payment transactions
-                PaymentTransaction.settle([payment_transaction])
-
-                self.assertEqual(payment_transaction.state, 'posted')
-
-                # Capture Payment transactions
-                payment_transaction = PaymentTransaction(
-                    description="Payment Transaction 1",
-                    party=self.party1.id,
-                    address=self.party1.addresses[0].id,
-                    amount=Decimal('70'),
-                    currency=self.company.currency.id,
-                    gateway=gateway.id,
-                )
-                payment_transaction.save()
-
-                PaymentTransaction.capture([payment_transaction])
-
-                self.assertEqual(payment_transaction.state, 'posted')
-
-    def test0150_giftcard_redeem_wizard(self):
+    def test0140_giftcard_redeem_wizard(self):
         """
         Tests the gift card redeem wizard.
         """

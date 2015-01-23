@@ -34,6 +34,10 @@ class PaymentTransaction:
     """
     __name__ = 'payment_gateway.transaction'
 
+    gift_card = fields.Function(fields.Many2One(
+        'gift_card.gift_card', 'Gift Card', select=True
+    ), 'get_gift_card', searcher='search_gift_card')
+
     @classmethod
     def __setup__(cls):
         super(PaymentTransaction, cls).__setup__()
@@ -61,6 +65,26 @@ class PaymentTransaction:
                 (Eval('method') == 'gift_card')
         )
 
+    @classmethod
+    def search_gift_card(cls, name, clause):
+        """
+        Returns list of arguments for searching gift_card.
+        """
+        if clause[1] == 'in':
+            return [('sale_payment.gift_card', 'in', clause[2])]
+        elif clause[1] == '=':
+            return [('sale_payment.gift_card', '=', clause[2])]
+        return []
+
+    def get_gift_card(self, name=None):
+        """
+        Return gift_card of this transaction's sale_payment.
+        """
+        return (
+            self.sale_payment.gift_card and self.sale_payment.gift_card.id
+            or None
+        )
+
     def validate_gift_card_amount(self, available_amount):
         """
         Validates that gift card has sufficient amount to pay
@@ -77,7 +101,9 @@ class PaymentTransaction:
         Authorize using gift card for the specific transaction.
         """
         if self.method == 'gift_card':
-            self.validate_gift_card_amount(self.gift_card.amount_available)
+            self.validate_gift_card_amount(
+                self.gift_card.amount_available
+            )
 
         return super(PaymentTransaction, self).authorize_self()
 
@@ -86,7 +112,9 @@ class PaymentTransaction:
         Capture using gift card for the specific transaction.
         """
         if self.method == 'gift_card':
-            self.validate_gift_card_amount(self.gift_card.amount_available)
+            self.validate_gift_card_amount(
+                self.gift_card.amount_available
+            )
 
         return super(PaymentTransaction, self).capture_self()
 
@@ -99,6 +127,7 @@ class PaymentTransaction:
             # previously authorized amount
             available_amount = \
                 self.gift_card.amount - self.gift_card.amount_captured
+
             self.validate_gift_card_amount(available_amount)
 
         return super(PaymentTransaction, self).settle_self()
